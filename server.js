@@ -194,6 +194,29 @@ function rainfall() {
   broadcastState();
 }
 
+// 真っ黒なボタン：発動者を中心に、全員を同じYへ集める。
+// Xは発動者の位置を中心として -10 ～ +10 のランダムな範囲に配置し、
+// 全員の方向を0°（右向き）にする。
+function blackButton(sourcePlayer) {
+  const centerX = sourcePlayer.x;
+  const centerY = sourcePlayer.y;
+
+  for (const player of players.values()) {
+    if (!player.alive) continue;
+    const offsetX = Math.floor(Math.random() * 21) - 10;
+    player.x = (centerX + offsetX + GRID_W) % GRID_W;
+    player.y = centerY;
+    player.angle = 0;
+  }
+
+  broadcast({
+    type: 'blackButton',
+    x: centerX,
+    y: centerY
+  });
+  broadcastState();
+}
+
 function createPlayer(ws) {
   if (players.size >= MAX_PLAYERS) {
     ws.send(JSON.stringify({ type: 'error', message: '満員です（最大10人）' }));
@@ -295,6 +318,8 @@ wss.on('connection', (ws) => {
       player.lastTurnAt = now;
     } else if (data.action === 'rain') {
       rainfall();
+    } else if (data.action === 'blackButton') {
+      blackButton(player);
     }
   });
 
