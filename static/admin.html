@@ -5,15 +5,18 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Admin - LAN Territory Battle</title>
   <style>
-    body { font-family: sans-serif; margin: 0; padding: 24px; background: #11151c; color: white; }
-    main { max-width: 760px; margin: auto; }
-    section { background: #1a2029; border-radius: 12px; padding: 18px; margin: 16px 0; }
-    button { margin: 6px; padding: 12px 18px; font-size: 16px; cursor: pointer; }
-    input { padding: 10px; font-size: 16px; width: min(100%, 420px); box-sizing: border-box; }
+    body { font-family: sans-serif; margin: 0; padding: 16px; background: #11151c; color: white; }
+    main { max-width: 1200px; margin: auto; }
+    section { background: #1a2029; border-radius: 12px; padding: 16px; margin: 12px 0; }
+    button { margin: 6px; padding: 10px 16px; font-size: 15px; cursor: pointer; }
+    input { padding: 9px; font-size: 16px; width: min(100%, 420px); box-sizing: border-box; }
     .hidden { display: none; }
-    #message { margin-top: 16px; min-height: 24px; }
-    #population { font-size: 22px; font-weight: bold; }
+    #message { margin-top: 12px; min-height: 24px; }
+    #population { font-size: 20px; font-weight: bold; }
     .row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+    #liveWrap { display: none; }
+    #game { width: 100%; height: min(70vh, 760px); display: block; background: #0b0e13; border-radius: 10px; }
+    #liveInfo { margin-top: 8px; font-size: 14px; }
   </style>
 </head>
 <body>
@@ -28,6 +31,13 @@
 
     <div id="controls" class="hidden">
       <section>
+        <h2>現在の状況</h2>
+        <div id="population">読み込み中...</div>
+        <canvas id="game"></canvas>
+        <div id="liveInfo">管理者は観戦のみ。プレイヤーとして参加しません。</div>
+      </section>
+
+      <section>
         <h2>特殊ボタン</h2>
         <button data-special="rain">🌧️ 雨</button>
         <button data-special="blackButton">⬛ 全員強制整列</button>
@@ -36,7 +46,6 @@
 
       <section>
         <h2>CPU投入</h2>
-        <div id="population">読み込み中...</div>
         <div class="row">
           <input id="cpuCount" type="number" min="1" max="1000" value="10" placeholder="追加するCPU数">
           <button id="addCpu">🤖 CPU追加</button>
@@ -59,6 +68,10 @@
     const cpuCount = document.getElementById('cpuCount');
     const addCpu = document.getElementById('addCpu');
     const clearCpu = document.getElementById('clearCpu');
+    const canvas = document.getElementById('game');
+    const ctx = canvas.getContext('2d');
+    let socket = null;
+    let state = null;
 
     async function request(url, options = {}) {
       const response = await fetch(url, options);
@@ -77,9 +90,10 @@
         });
         if (!data.ok) throw new Error('パスワードが違います。');
         login.classList.add('hidden');
-        controls.classList.remove('hidden');
+        controls.style.display = 'block';
         message.textContent = '管理者としてログインしました。';
-        updateStatus();
+        await updateStatus();
+        connectObserver();
       } catch (error) {
         message.textContent = error.message;
       }
@@ -95,6 +109,108 @@
       }
     }
 
+    function connectObserver() {
+      if (socket && (socket.readyState === WebSocket.OPEN || socket.readyState === WebSocket.CONNECTING)) return;
+      const protocol = location.protocol === 'https:' ? 'wss' : 'ws';
+      socket = new WebSocket(`${protocol}://${location.host}/ws?observer=1`);
+      socket.addEventListener('message', event => {
+        try {
+          const data = JSON.parse(event.data);
+          if (data.type === 'state') {
+            state = data;
+            drawState();
+          }
+        } catch {}
+      });
+      socket.addEventListener('close', () => {
+        setTimeout(connectObserver, 1000);
+      });
+    }
+
+    function resizeCanvas() {
+      const dpr = Math.max(1, Math.min(2, window.devicePixelRatio || 1));
+      canvas.width = Math.floor(canvas.clientWidth * dpr);
+      canvas.height = Math.floor(canvas.clientHeight * dpr);
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+      drawState();
+    }
+
+    function colorFor(id) {
+      const p = state?.players?.find(x => x.id === id);
+      return p?.color || '#777';
+    }
+
+    function drawState() {
+      const w = canvas.clientWidth;
+      const h = canvas.clientHeight;
+      ctx.clearRect(0, 0, w, h);
+      ctx.fillStyle = '#0b0e13';
+      ctx.fillRect(0, 0, w, h);
+      if (!state) {
+        ctx.fillStyle = 'white';
+        ctx.font = '20px sans-serif';
+        ctx.textAlign = 'center';
+        ctx.fillText('観戦データを待っています...', w / 2, h / 2);
+        return;
+      }
+
+      const gw = state.grid.w;
+      const gh = state.grid.h;
+      const scale = Math.min(w / gw, h / gh);
+      const ox = (w - gw * scale) / 2;
+      const oy = (h - gh * scale) / 2;
+
+      for (let y = 0; y < gh; y++) {
+        for (let x = 0; x < gw; x++) {
+          const owner = state.territory[y * gw + x];
+          if (owner >= 0) {
+            ctx.fillStyle = colorFor(owner);
+            ctx.fillRect(ox + x * scale, oy + y * scale, scale + 0.5, scale + 0.5);
+          }
+        }
+      }
+
+      for (const pr of state.projectiles || []) {
+        ctx.font = `${Math.max(10, scale * 0.8)}px sans-serif`;
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText(pr.emoji || '•', ox + pr.x * scale, oy + pr.y * scale);
+      }
+
+      for (const p of state.players || []) {
+        if (!p.alive) continue;
+        const px = ox + p.x * scale;
+        const py = oy + p.y * scale;
+        const rad = p.angle * Math.PI / 180;
+        const len = Math.max(8, scale * 1.5);
+        ctx.save();
+        ctx.strokeStyle = 'white';
+        ctx.lineWidth = 1.5;
+        ctx.beginPath();
+        ctx.moveTo(px, py);
+        ctx.lineTo(px + Math.cos(rad) * len, py + Math.sin(rad) * len);
+        ctx.stroke();
+        ctx.fillStyle = colorFor(p.id);
+        ctx.translate(px, py);
+        ctx.rotate(rad);
+        ctx.beginPath();
+        ctx.moveTo(scale * 0.7, 0);
+        ctx.lineTo(-scale * 0.45, -scale * 0.35);
+        ctx.lineTo(-scale * 0.45, scale * 0.35);
+        ctx.closePath();
+        ctx.fill();
+        ctx.restore();
+      }
+
+      ctx.fillStyle = 'white';
+      ctx.font = '14px sans-serif';
+      ctx.textAlign = 'left';
+      ctx.fillText(`${state.players?.length || 0} players`, 10, 20);
+      if (state.winner !== null) ctx.fillText(`WINNER: P${state.winner + 1}`, 10, 42);
+    }
+
+    window.addEventListener('resize', resizeCanvas);
+    resizeCanvas();
     loginButton.addEventListener('click', loginAdmin);
     password.addEventListener('keydown', e => { if (e.key === 'Enter') loginAdmin(); });
 
@@ -134,7 +250,7 @@
 
     clearCpu.addEventListener('click', async () => {
       try {
-        const data = await request('/api/cpu', { method: 'DELETE' });
+        await request('/api/cpu', { method: 'DELETE' });
         message.textContent = 'CPUをすべて削除しました。';
         await updateStatus();
       } catch (error) {
