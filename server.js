@@ -13,7 +13,6 @@ const TICK_RATE = 60;
 const TURN_INTERVAL_MS = 10;
 const TURN_ANGLE = 15;
 const MOVE_SPEED = 7;
-const PROJECTILE_TICK = 1 / TICK_RATE;
 
 const COLORS = [
   '#ff4d4d', '#4d8dff', '#4dff88', '#ffd24d', '#b84dff',
@@ -21,15 +20,14 @@ const COLORS = [
 ];
 
 const WEAPONS = {
-  potato: { name: '🥔 じゃがいも投げ', cooldown: 350, speed: 18, range: 16, radius: 1, damage: 3, count: 1, spread: 0 },
-  chicken: { name: '🐔 ニワトリ突撃', cooldown: 650, speed: 13, range: 20, radius: 2, damage: 7, count: 1, spread: 0, homing: true },
-  chair: { name: '🪑 椅子投げ', cooldown: 900, speed: 15, range: 14, radius: 2, damage: 12, count: 1, spread: 0 },
-  sock: { name: '🧦 靴下砲', cooldown: 180, speed: 28, range: 24, radius: 1, damage: 20, count: 1, spread: 0 },
-  tinyBoom: { name: '🧨 ものすごく小さい爆発', cooldown: 1100, speed: 12, range: 12, radius: 2, damage: 21, count: 1, spread: 0, explode: true },
-  ducks: { name: '🦆 アヒル軍団', cooldown: 1600, speed: 16, range: 18, radius: 1, damage: 100, count: 7, spread: 0.18 },
-  mystery: { name: '☢️ 謎のボタン', cooldown: 2400, speed: 0, range: 0, radius: 0, damage: 0, count: 1, spread: 0, mystery: true }
+  potato: { name: '🥔 じゃがいも投げ', cooldown: 350, speed: 18, radius: 1, count: 1, spread: 0 },
+  chicken: { name: '🐔 ニワトリ突撃', cooldown: 650, speed: 13, radius: 2, count: 1, spread: 0, homing: true },
+  chair: { name: '🪑 椅子投げ', cooldown: 900, speed: 15, radius: 2, count: 1, spread: 0 },
+  sock: { name: '🧦 靴下砲', cooldown: 180, speed: 28, radius: 1, count: 1, spread: 0 },
+  tinyBoom: { name: '🧨 ものすごく小さい爆発', cooldown: 1100, speed: 12, radius: 2, count: 1, spread: 0, explode: true },
+  ducks: { name: '🦆 アヒル軍団', cooldown: 1600, speed: 16, radius: 1, count: 7, spread: 0.18 },
+  mystery: { name: '☢️ 謎のボタン', cooldown: 2400, speed: 0, radius: 0, count: 1, spread: 0, mystery: true }
 };
-const WEAPON_KEYS = ['potato', 'chicken', 'chair', 'sock', 'tinyBoom', 'ducks', 'mystery'];
 
 const players = new Map();
 const projectiles = new Map();
@@ -237,6 +235,7 @@ function rainfall() {
   }
   eliminateIfEmpty();
   broadcast({ type: 'rain' });
+  broadcastState();
 }
 
 function blackButton(sourcePlayer) {
@@ -252,6 +251,7 @@ function blackButton(sourcePlayer) {
   }
 
   broadcast({ type: 'blackButton', x: centerX, y: centerY });
+  broadcastState();
 }
 
 function cellDistanceWrapped(x1, y1, x2, y2) {
@@ -286,6 +286,7 @@ function mysteryWeapon(source) {
       player.angle = 0;
     }
     broadcast({ type: 'weaponEvent', kind: 'mystery', text: '☢️ 謎のボタン：全員右向き！' });
+    broadcastState();
   }
 }
 
@@ -313,10 +314,7 @@ function fireWeapon(player) {
       y: player.y,
       angle,
       speed: weapon.speed,
-      distance: 0,
-      maxDistance: weapon.range,
       radius: weapon.radius,
-      damage: weapon.damage,
       homing: !!weapon.homing,
       explode: !!weapon.explode,
       emoji: player.weapon === 'potato' ? '🥔' :
@@ -326,6 +324,7 @@ function fireWeapon(player) {
         player.weapon === 'tinyBoom' ? '🧨' : '🦆'
     });
   }
+  broadcastState();
 }
 
 function seekHomingTarget(projectile) {
@@ -341,55 +340,48 @@ function seekHomingTarget(projectile) {
   }
   if (!best || bestDistance > 15) return;
   const targetAngle = Math.atan2(best.y - projectile.y, best.x - projectile.x);
-  let diff = Math.atan2(Math.sin(targetAngle - projectile.angle), Math.cos(targetAngle - projectile.angle));
-  const turn = Math.min(Math.abs(diff), 0.05);
-  projectile.angle += Math.sign(diff) * turn;
+  const diff = Math.atan2(Math.sin(targetAngle - projectile.angle), Math.cos(targetAngle - projectile.angle));
+  projectile.angle += Math.sign(diff) * Math.min(Math.abs(diff), 0.05);
 }
 
-function hitPlayersAndTerrain(projectile) {
-  const owner = projectile.owner;
-  const px = projectile.x;
-  const py = projectile.y;
-
+function projectileHitsPlayer(projectile) {
   for (const target of players.values()) {
-    if (!target.alive || target.id === owner) continue;
-    if (cellDistanceWrapped(px, py, target.x, target.y) <= 1.4 + projectile.radius) {
-      applyWeaponArea(owner, px, py, projectile.radius);
+    if (!target.alive || target.id === projectile.owner) continue;
+    if (cellDistanceWrapped(projectile.x, projectile.y, target.x, target.y) <= 1.4 + projectile.radius) {
+      applyWeaponArea(projectile.owner, projectile.x, projectile.y, projectile.radius);
+      if (projectile.explode) {
+        applyWeaponArea(projectile.owner, projectile.x, projectile.y, 3);
+        broadcast({ type: 'explosion', x: projectile.x, y: projectile.y });
+      }
       return true;
     }
   }
-
-  // Weapons also paint as they travel so the game rewards firing into enemy territory.
-  if (projectile.radius > 0) {
-    const cellX = clampInt(px, 0, GRID_W - 1);
-    const cellY = clampInt(py, 0, GRID_H - 1);
-    if (territory[idx(cellX, cellY)] !== owner) {
-      paintCircle(px, py, projectile.radius, owner);
-    }
-  }
-
-  if (projectile.distance >= projectile.maxDistance) {
-    applyWeaponArea(owner, px, py, projectile.radius);
-    return true;
-  }
   return false;
+}
+
+function projectileReachedScreenEdge(projectile, previousX, previousY) {
+  // Unlike players, projectiles do NOT wrap around. They remain alive until
+  // their path actually reaches a screen edge, then disappear.
+  return projectile.x <= 0 || projectile.x >= GRID_W - 1 || projectile.y <= 0 || projectile.y >= GRID_H - 1;
 }
 
 function updateProjectiles(dt) {
   for (const [id, projectile] of projectiles) {
     if (projectile.homing) seekHomingTarget(projectile);
 
-    const dx = Math.cos(projectile.angle) * projectile.speed * dt;
-    const dy = Math.sin(projectile.angle) * projectile.speed * dt;
-    projectile.x = wrap(projectile.x + dx, GRID_W);
-    projectile.y = wrap(projectile.y + dy, GRID_H);
-    projectile.distance += Math.hypot(dx, dy);
+    const previousX = projectile.x;
+    const previousY = projectile.y;
+    projectile.x += Math.cos(projectile.angle) * projectile.speed * dt;
+    projectile.y += Math.sin(projectile.angle) * projectile.speed * dt;
 
-    if (hitPlayersAndTerrain(projectile)) {
-      if (projectile.explode) {
-        applyWeaponArea(projectile.owner, projectile.x, projectile.y, 3);
-        broadcast({ type: 'explosion', x: projectile.x, y: projectile.y });
-      }
+    // Paint continuously while flying, but never remove the projectile for a hit.
+    if (projectile.radius > 0) {
+      paintCircle(projectile.x, projectile.y, projectile.radius, projectile.owner);
+    }
+
+    projectileHitsPlayer(projectile);
+
+    if (projectileReachedScreenEdge(projectile, previousX, previousY)) {
       projectiles.delete(id);
     }
   }
@@ -504,6 +496,7 @@ wss.on('connection', (ws) => {
     } else if (data.action === 'weapon') {
       const weapon = String(data.weapon);
       if (WEAPONS[weapon]) player.weapon = weapon;
+      broadcastState();
     } else if (data.action === 'fire') {
       fireWeapon(player);
     }
