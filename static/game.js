@@ -13,14 +13,17 @@ const WEAPONS = {
   sock: '🧦 靴下砲',
   tinyBoom: '🧨 ものすごく小さい爆発',
   ducks: '🦆 アヒル軍団',
-  mystery: '☢️ 謎のボタン'
+  mystery: '☢️ 謎のボタン',
+  aptx: '🧪 APTX4869'
 };
-const WEAPON_ORDER = ['potato', 'chicken', 'chair', 'sock', 'tinyBoom', 'ducks', 'mystery'];
+const WEAPON_ORDER = ['potato','chicken','chair','sock','tinyBoom','ducks','mystery','aptx'];
 
 let state = null;
 let socket = null;
+let myPlayerId = null;
 let selectedWeapon = 'potato';
 let firing = false;
+let firedThisPress = false;
 const keys = new Set();
 let rainFlash = 0;
 let blackFlash = 0;
@@ -43,290 +46,157 @@ function connect() {
   const protocol = location.protocol === 'https:' ? 'wss' : 'ws';
   socket = new WebSocket(`${protocol}://${location.host}/ws`);
 
-  socket.addEventListener('open', () => {
-    statusEl.textContent = '接続済み';
-  });
-
-  socket.addEventListener('close', () => {
-    statusEl.textContent = '切断されました。再接続中...';
-    setTimeout(connect, 1000);
-  });
-
-  socket.addEventListener('error', () => {
-    statusEl.textContent = '接続エラー';
-  });
+  socket.addEventListener('open', () => { statusEl.textContent = '接続済み'; });
+  socket.addEventListener('close', () => { statusEl.textContent = '切断されました。再接続中...'; setTimeout(connect, 1000); });
+  socket.addEventListener('error', () => { statusEl.textContent = '接続エラー'; });
 
   socket.addEventListener('message', event => {
     const data = JSON.parse(event.data);
     if (data.type === 'welcome') {
+      myPlayerId = data.player.id;
       statusEl.textContent = `Player ${data.player.id + 1}`;
       selectedWeapon = data.player.weapon || 'potato';
       updateWeaponUI();
     } else if (data.type === 'state') {
       state = data;
       if (state.winner !== null) statusEl.textContent = `Player ${state.winner + 1} WIN!`;
-    } else if (data.type === 'rain') {
-      rainFlash = 1;
-    } else if (data.type === 'blackButton') {
-      blackFlash = 1;
-    } else if (data.type === 'explosion') {
-      explosionFlash = 1;
-    } else if (data.type === 'weaponEvent') {
-      eventText = data.text || '';
-      eventTextTimer = 180;
-    } else if (data.type === 'adminEvent') {
-      eventText = data.action === 'rain' ? '管理者：🌧️ 雨！' : '管理者：⬛ 全員強制整列！';
-      eventTextTimer = 180;
-    } else if (data.type === 'error') {
-      statusEl.textContent = data.message;
-    }
+    } else if (data.type === 'rain') rainFlash = 1;
+    else if (data.type === 'blackButton') blackFlash = 1;
+    else if (data.type === 'explosion') explosionFlash = 1;
+    else if (data.type === 'weaponEvent') { eventText = data.text || ''; eventTextTimer = 180; }
+    else if (data.type === 'adminEvent') { eventText = data.action === 'rain' ? '管理者：🌧️ 雨！' : '管理者：⬛ 全員強制整列！'; eventTextTimer = 180; }
+    else if (data.type === 'apTX') {
+      eventText = `🧪 P${data.playerId + 1} が APTX4869 の影響！${data.weaponDisabled ? ' 武器使用不能！' : ''}`;
+      eventTextTimer = 240;
+    } else if (data.type === 'error') statusEl.textContent = data.message;
   });
 }
 connect();
 
-function send(payload) {
-  if (socket?.readyState === WebSocket.OPEN) socket.send(JSON.stringify(payload));
-}
-
-function chooseWeapon(weapon) {
-  if (!WEAPONS[weapon]) return;
-  selectedWeapon = weapon;
-  send({ action: 'weapon', weapon });
-  updateWeaponUI();
-}
-
-function fire() {
-  send({ action: 'fire' });
-}
+function send(payload) { if (socket?.readyState === WebSocket.OPEN) socket.send(JSON.stringify(payload)); }
+function chooseWeapon(weapon) { if (!WEAPONS[weapon]) return; selectedWeapon = weapon; send({ action:'weapon', weapon }); updateWeaponUI(); }
+function getMe() { return state?.players?.find(p => p.id === myPlayerId) || null; }
+function canRapidFire() { const me = getMe(); return !me || !me.singleShot; }
+function weaponUsable() { const me = getMe(); return !me || !me.weaponDisabled; }
+function fire() { if (!weaponUsable()) return; send({ action:'fire' }); }
+function releaseFire() { send({ action:'releaseFire' }); firedThisPress = false; }
 
 function updateWeaponUI() {
-  weaponButtons.forEach(button => {
-    button.classList.toggle('selected', button.dataset.weapon === selectedWeapon);
-  });
-  weaponInfo.textContent = selectedWeapon === 'mystery'
-    ? `武器: ${WEAPONS[selectedWeapon]}　（50秒クール・長押ししても連打不可）`
-    : `武器: ${WEAPONS[selectedWeapon]}　（1〜7で選択、Space長押しで連射・クールなし）`;
+  const me = getMe();
+  weaponButtons.forEach(button => button.classList.toggle('selected', button.dataset.weapon === selectedWeapon));
+  if (me?.weaponDisabled) {
+    weaponInfo.textContent = `武器: ${WEAPONS[selectedWeapon]}　⛔ 武器使用不能`;
+  } else if (me?.singleShot) {
+    weaponInfo.textContent = `武器: ${WEAPONS[selectedWeapon]}　🧪 APTX効果：1回押すごとに1発`;
+  } else if (selectedWeapon === 'mystery') {
+    weaponInfo.textContent = `武器: ${WEAPONS[selectedWeapon]}　（50秒クール・長押ししても連打不可）`;
+  } else {
+    weaponInfo.textContent = `武器: ${WEAPONS[selectedWeapon]}　（1〜8で選択、Space長押しで連射・クールなし）`;
+  }
 }
-
-weaponButtons.forEach(button => {
-  button.addEventListener('click', () => chooseWeapon(button.dataset.weapon));
-});
+weaponButtons.forEach(button => button.addEventListener('click', () => chooseWeapon(button.dataset.weapon)));
 
 fireButton.addEventListener('mousedown', event => {
   event.preventDefault();
   firing = true;
+  firedThisPress = false;
   fire();
+  firedThisPress = true;
 });
-fireButton.addEventListener('mouseup', () => {
-  firing = false;
-});
-fireButton.addEventListener('mouseleave', () => {
-  firing = false;
-});
-fireButton.addEventListener('touchstart', event => {
-  event.preventDefault();
-  firing = true;
-  fire();
-}, { passive: false });
-fireButton.addEventListener('touchend', event => {
-  event.preventDefault();
-  firing = false;
-}, { passive: false });
+fireButton.addEventListener('mouseup', () => { firing = false; releaseFire(); });
+fireButton.addEventListener('mouseleave', () => { if (firing) releaseFire(); firing = false; });
+fireButton.addEventListener('touchstart', event => { event.preventDefault(); firing = true; firedThisPress = false; fire(); firedThisPress = true; }, { passive:false });
+fireButton.addEventListener('touchend', event => { event.preventDefault(); firing = false; releaseFire(); }, { passive:false });
 
 window.addEventListener('keydown', event => {
   const key = event.key.toLowerCase();
-
-  if (['arrowleft', 'arrowright', 'a', 'd'].includes(key)) {
-    event.preventDefault();
-    keys.add(key);
-    return;
-  }
+  if (['arrowleft','arrowright','a','d'].includes(key)) { event.preventDefault(); keys.add(key); return; }
 
   const number = Number(event.key);
-  if (number >= 1 && number <= 7) {
-    event.preventDefault();
-    chooseWeapon(WEAPON_ORDER[number - 1]);
-    return;
-  }
+  if (number >= 1 && number <= 8) { event.preventDefault(); chooseWeapon(WEAPON_ORDER[number - 1]); return; }
 
   if (event.code === 'Space') {
     event.preventDefault();
     firing = true;
-    if (!event.repeat) fire();
+    const rapid = canRapidFire();
+    if (!event.repeat || !rapid) {
+      if (!firedThisPress) { fire(); firedThisPress = true; }
+    }
   }
 });
-
 window.addEventListener('keyup', event => {
   keys.delete(event.key.toLowerCase());
-  if (event.code === 'Space') firing = false;
+  if (event.code === 'Space') { firing = false; releaseFire(); }
 });
-
-window.addEventListener('blur', () => {
-  keys.clear();
-  firing = false;
-});
+window.addEventListener('blur', () => { keys.clear(); firing = false; releaseFire(); });
 
 setInterval(() => {
   const left = keys.has('a') || keys.has('arrowleft');
   const right = keys.has('d') || keys.has('arrowright');
-  if (left && !right) send({ action: 'turn', direction: -1 });
-  if (right && !left) send({ action: 'turn', direction: 1 });
+  if (left && !right) send({ action:'turn', direction:-1 });
+  if (right && !left) send({ action:'turn', direction:1 });
 }, 10);
 
 setInterval(() => {
-  if (firing) fire();
+  const me = getMe();
+  if (!firing || me?.singleShot || me?.weaponDisabled) return;
+  fire();
 }, 10);
 
-function directionArrow(angle) {
-  const normalized = ((angle % 360) + 360) % 360;
-  const index = Math.round(normalized / 45) % 8;
-  return ['→', '↘', '↓', '↙', '←', '↖', '↑', '↗'][index];
-}
+function directionArrow(angle) { const normalized=((angle%360)+360)%360; const index=Math.round(normalized/45)%8; return ['→','↘','↓','↙','←','↖','↑','↗'][index]; }
+function playerColor(id) { const p=state?.players?.find(x=>x.id===id); return p?.color || '#777'; }
 
-function playerColor(id) {
-  const player = state?.players?.find(x => x.id === id);
-  return player?.color || '#777';
-}
-
-function drawPlayerDirection(p, px, py, scale) {
-  const rad = p.angle * Math.PI / 180;
-  const length = Math.max(12, scale * 1.8);
-  const endX = px + Math.cos(rad) * length;
-  const endY = py + Math.sin(rad) * length;
-
+function drawPlayerDirection(p, px, py, scale, sizeMultiplier) {
+  const rad=p.angle*Math.PI/180;
+  const length=Math.max(12,scale*1.8*sizeMultiplier);
+  const endX=px+Math.cos(rad)*length;
+  const endY=py+Math.sin(rad)*length;
   ctx.save();
-  ctx.strokeStyle = 'white';
-  ctx.lineWidth = Math.max(2, scale * 0.12);
-  ctx.beginPath();
-  ctx.moveTo(px, py);
-  ctx.lineTo(endX, endY);
-  ctx.stroke();
-
-  ctx.fillStyle = 'white';
-  ctx.beginPath();
-  ctx.moveTo(endX, endY);
-  ctx.lineTo(endX - Math.cos(rad - 0.55) * scale * 0.65, endY - Math.sin(rad - 0.55) * scale * 0.65);
-  ctx.lineTo(endX - Math.cos(rad + 0.55) * scale * 0.65, endY - Math.sin(rad + 0.55) * scale * 0.65);
-  ctx.closePath();
-  ctx.fill();
-  ctx.restore();
+  ctx.strokeStyle='white';
+  ctx.lineWidth=Math.max(2,scale*0.12*sizeMultiplier);
+  ctx.beginPath();ctx.moveTo(px,py);ctx.lineTo(endX,endY);ctx.stroke();
+  ctx.fillStyle='white';ctx.beginPath();ctx.moveTo(endX,endY);ctx.lineTo(endX-Math.cos(rad-0.55)*scale*0.65*sizeMultiplier,endY-Math.sin(rad-0.55)*scale*0.65*sizeMultiplier);ctx.lineTo(endX-Math.cos(rad+0.55)*scale*0.65*sizeMultiplier,endY-Math.sin(rad+0.55)*scale*0.65*sizeMultiplier);ctx.closePath();ctx.fill();ctx.restore();
 }
-
 function drawProjectile(projectile, ox, oy, scale) {
-  const px = ox + projectile.x * scale;
-  const py = oy + projectile.y * scale;
-  const size = Math.max(12, scale * 0.8);
-
-  ctx.save();
-  ctx.translate(px, py);
-  ctx.rotate(projectile.angle || 0);
-  ctx.font = `${size}px sans-serif`;
-  ctx.textAlign = 'center';
-  ctx.textBaseline = 'middle';
-  ctx.fillText(projectile.emoji || '•', 0, 0);
-  ctx.restore();
+  const px=ox+projectile.x*scale,py=oy+projectile.y*scale,size=Math.max(12,scale*0.8);
+  ctx.save();ctx.translate(px,py);ctx.rotate(projectile.angle||0);ctx.font=`${size}px sans-serif`;ctx.textAlign='center';ctx.textBaseline='middle';ctx.fillText(projectile.emoji||'•',0,0);ctx.restore();
 }
 
 function draw() {
-  const w = canvas.clientWidth;
-  const h = canvas.clientHeight;
-  ctx.clearRect(0, 0, w, h);
-  ctx.fillStyle = '#11151c';
-  ctx.fillRect(0, 0, w, h);
+  const w=canvas.clientWidth,h=canvas.clientHeight;ctx.clearRect(0,0,w,h);ctx.fillStyle='#11151c';ctx.fillRect(0,0,w,h);
+  if(!state){ctx.fillStyle='white';ctx.font='24px sans-serif';ctx.textAlign='center';ctx.fillText('サーバーに接続しています...',w/2,h/2);requestAnimationFrame(draw);return;}
+  const gw=state.grid.w,gh=state.grid.h,scale=Math.min(w/gw,h/gh),ox=(w-gw*scale)/2,oy=(h-gh*scale)/2;
 
-  if (!state) {
-    ctx.fillStyle = 'white';
-    ctx.font = '24px sans-serif';
-    ctx.textAlign = 'center';
-    ctx.fillText('サーバーに接続しています...', w / 2, h / 2);
-    requestAnimationFrame(draw);
-    return;
-  }
+  for(let y=0;y<gh;y++) for(let x=0;x<gw;x++){const owner=state.territory[y*gw+x];if(owner>=0){ctx.fillStyle=playerColor(owner);ctx.fillRect(ox+x*scale,oy+y*scale,scale+0.5,scale+0.5);}}
+  for(const projectile of state.projectiles||[]) drawProjectile(projectile,ox,oy,scale);
 
-  const gw = state.grid.w;
-  const gh = state.grid.h;
-  const scale = Math.min(w / gw, h / gh);
-  const ox = (w - gw * scale) / 2;
-  const oy = (h - gh * scale) / 2;
+  for(const p of state.players){
+    if(!p.alive) continue;
+    const px=ox+p.x*scale,py=oy+p.y*scale,sizeMultiplier=p.size ?? 2;
+    drawPlayerDirection(p,px,py,scale,sizeMultiplier);
+    ctx.save();ctx.translate(px,py);ctx.rotate(p.angle*Math.PI/180);ctx.fillStyle=playerColor(p.id);ctx.beginPath();
+    ctx.moveTo(scale*0.8*sizeMultiplier,0);ctx.lineTo(-scale*0.55*sizeMultiplier,-scale*0.45*sizeMultiplier);ctx.lineTo(-scale*0.55*sizeMultiplier,scale*0.45*sizeMultiplier);ctx.closePath();ctx.fill();ctx.restore();
 
-  for (let y = 0; y < gh; y++) {
-    for (let x = 0; x < gw; x++) {
-      const owner = state.territory[y * gw + x];
-      if (owner >= 0) {
-        ctx.fillStyle = playerColor(owner);
-        ctx.fillRect(ox + x * scale, oy + y * scale, scale + 0.5, scale + 0.5);
-      }
+    if(p.singleShot || p.weaponDisabled){
+      ctx.fillStyle=p.weaponDisabled?'#ff3030':'#ffffff';ctx.font='bold 12px sans-serif';ctx.textAlign='center';
+      ctx.fillText(p.weaponDisabled?'⛔':'🧪',px,py-scale*1.2);
     }
   }
 
-  for (const projectile of state.projectiles || []) {
-    drawProjectile(projectile, ox, oy, scale);
-  }
-
-  for (const p of state.players) {
-    if (!p.alive) continue;
-    const px = ox + p.x * scale;
-    const py = oy + p.y * scale;
-    drawPlayerDirection(p, px, py, scale);
-
-    ctx.save();
-    ctx.translate(px, py);
-    ctx.rotate(p.angle * Math.PI / 180);
-    ctx.fillStyle = playerColor(p.id);
-    ctx.beginPath();
-    ctx.moveTo(scale * 0.8, 0);
-    ctx.lineTo(-scale * 0.55, -scale * 0.45);
-    ctx.lineTo(-scale * 0.55, scale * 0.45);
-    ctx.closePath();
-    ctx.fill();
-    ctx.restore();
-  }
-
-  const alive = state.players.filter(p => p.alive);
-  infoEl.textContent = alive.map(p => {
-    const cooldown = p.weapon === 'mystery' && p.weaponCooldown > 0
-      ? ` ⏳${Math.ceil(p.weaponCooldown / 100) / 10}s`
-      : '';
-    return `P${p.id + 1} ${directionArrow(p.angle)} ${Math.round(p.angle)}°: ${p.territory}${cooldown}`;
+  const alive=state.players.filter(p=>p.alive);
+  infoEl.textContent=alive.map(p=>{
+    const flags=(p.singleShot?' 🧪':'')+(p.weaponDisabled?' ⛔':'');
+    const cooldown=p.weapon==='mystery'&&p.weaponCooldown>0?` ⏳${Math.ceil(p.weaponCooldown/100)/10}s`:'';
+    return `P${p.id+1}${p.cpu?'🤖':''} ${directionArrow(p.angle)} ${Math.round(p.angle)}°: ${p.territory}${flags}${cooldown}`;
   }).join('   ');
 
-  if (state.winner !== null) {
-    ctx.fillStyle = 'rgba(0,0,0,0.65)';
-    ctx.fillRect(0, 0, w, h);
-    ctx.fillStyle = 'white';
-    ctx.font = 'bold 46px sans-serif';
-    ctx.textAlign = 'center';
-    ctx.fillText(`PLAYER ${state.winner + 1} WIN!`, w / 2, h / 2);
-  }
+  updateWeaponUI();
 
-  if (rainFlash > 0) {
-    ctx.fillStyle = `rgba(110,200,255,${0.25 * rainFlash})`;
-    ctx.fillRect(0, 0, w, h);
-    rainFlash = Math.max(0, rainFlash - 0.025);
-  }
-
-  if (blackFlash > 0) {
-    ctx.fillStyle = `rgba(0,0,0,${0.45 * blackFlash})`;
-    ctx.fillRect(0, 0, w, h);
-    blackFlash = Math.max(0, blackFlash - 0.035);
-  }
-
-  if (explosionFlash > 0) {
-    ctx.fillStyle = `rgba(255,220,120,${0.25 * explosionFlash})`;
-    ctx.fillRect(0, 0, w, h);
-    explosionFlash = Math.max(0, explosionFlash - 0.08);
-  }
-
-  if (eventTextTimer > 0) {
-    ctx.fillStyle = 'rgba(0,0,0,0.7)';
-    ctx.fillRect(w / 2 - 260, 20, 520, 54);
-    ctx.fillStyle = 'white';
-    ctx.font = 'bold 18px sans-serif';
-    ctx.textAlign = 'center';
-    ctx.fillText(eventText, w / 2, 53);
-    eventTextTimer--;
-  }
-
+  if(state.winner!==null){ctx.fillStyle='rgba(0,0,0,0.65)';ctx.fillRect(0,0,w,h);ctx.fillStyle='white';ctx.font='bold 46px sans-serif';ctx.textAlign='center';ctx.fillText(`PLAYER ${state.winner+1} WIN!`,w/2,h/2);}
+  if(rainFlash>0){ctx.fillStyle=`rgba(110,200,255,${0.25*rainFlash})`;ctx.fillRect(0,0,w,h);rainFlash=Math.max(0,rainFlash-0.025);}
+  if(blackFlash>0){ctx.fillStyle=`rgba(0,0,0,${0.45*blackFlash})`;ctx.fillRect(0,0,w,h);blackFlash=Math.max(0,blackFlash-0.035);}
+  if(explosionFlash>0){ctx.fillStyle=`rgba(255,220,120,${0.25*explosionFlash})`;ctx.fillRect(0,0,w,h);explosionFlash=Math.max(0,explosionFlash-0.08);}
+  if(eventTextTimer>0){ctx.fillStyle='rgba(0,0,0,0.7)';ctx.fillRect(w/2-260,20,520,54);ctx.fillStyle='white';ctx.font='bold 18px sans-serif';ctx.textAlign='center';ctx.fillText(eventText,w/2,53);eventTextTimer--;}
   requestAnimationFrame(draw);
 }
 
