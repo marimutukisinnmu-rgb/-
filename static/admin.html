@@ -6,50 +6,93 @@
   <title>Admin - LAN Territory Battle</title>
   <style>
     body { font-family: sans-serif; margin: 0; padding: 24px; background: #11151c; color: white; }
-    main { max-width: 720px; margin: auto; }
+    main { max-width: 760px; margin: auto; }
+    section { background: #1a2029; border-radius: 12px; padding: 18px; margin: 16px 0; }
     button { margin: 6px; padding: 12px 18px; font-size: 16px; cursor: pointer; }
-    input { padding: 10px; font-size: 16px; width: min(100%, 420px); }
+    input { padding: 10px; font-size: 16px; width: min(100%, 420px); box-sizing: border-box; }
     .hidden { display: none; }
     #message { margin-top: 16px; min-height: 24px; }
+    #population { font-size: 22px; font-weight: bold; }
+    .row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
   </style>
 </head>
 <body>
   <main>
     <h1>管理画面</h1>
+
     <section id="login">
       <p>パスワードを入力してください。</p>
       <input id="password" type="password" autocomplete="current-password">
       <button id="loginButton">ログイン</button>
     </section>
-    <section id="controls" class="hidden">
-      <h2>特殊ボタン</h2>
-      <button data-special="rain">🌧️ 雨</button>
-      <button data-special="blackButton">⬛ 全員強制整列</button>
-      <button data-special="random">🎲 ボタンのランダム</button>
-    </section>
+
+    <div id="controls" class="hidden">
+      <section>
+        <h2>特殊ボタン</h2>
+        <button data-special="rain">🌧️ 雨</button>
+        <button data-special="blackButton">⬛ 全員強制整列</button>
+        <button data-special="random">🎲 ボタンのランダム</button>
+      </section>
+
+      <section>
+        <h2>CPU投入</h2>
+        <div id="population">読み込み中...</div>
+        <div class="row">
+          <input id="cpuCount" type="number" min="1" max="1000" value="10" placeholder="追加するCPU数">
+          <button id="addCpu">🤖 CPU追加</button>
+          <button id="clearCpu">🗑️ CPU全削除</button>
+        </div>
+        <p>人間＋CPUの合計最大1000人。</p>
+      </section>
+    </div>
+
     <div id="message"></div>
   </main>
+
   <script>
     const password = document.getElementById('password');
     const loginButton = document.getElementById('loginButton');
     const login = document.getElementById('login');
     const controls = document.getElementById('controls');
     const message = document.getElementById('message');
+    const population = document.getElementById('population');
+    const cpuCount = document.getElementById('cpuCount');
+    const addCpu = document.getElementById('addCpu');
+    const clearCpu = document.getElementById('clearCpu');
+
+    async function request(url, options = {}) {
+      const response = await fetch(url, options);
+      let data = {};
+      try { data = await response.json(); } catch {}
+      if (!response.ok) throw new Error(data.message || `HTTP ${response.status}`);
+      return data;
+    }
 
     async function loginAdmin() {
-      const response = await fetch('/admin/login', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ password: password.value })
-      });
-      const data = await response.json();
-      if (!data.ok) {
-        message.textContent = 'パスワードが違います。';
-        return;
+      try {
+        const data = await request('/admin/login', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ password: password.value })
+        });
+        if (!data.ok) throw new Error('パスワードが違います。');
+        login.classList.add('hidden');
+        controls.classList.remove('hidden');
+        message.textContent = '管理者としてログインしました。';
+        updateStatus();
+      } catch (error) {
+        message.textContent = error.message;
       }
-      login.classList.add('hidden');
-      controls.classList.remove('hidden');
-      message.textContent = '管理者としてログインしました。';
+    }
+
+    async function updateStatus() {
+      try {
+        const data = await request('/api/status');
+        population.textContent = `人間 ${data.humans} / CPU ${data.cpus} / 合計 ${data.players} / ${data.maxPlayers}`;
+        cpuCount.max = Math.max(1, data.maxPlayers - data.players);
+      } catch (error) {
+        population.textContent = '状態取得失敗';
+      }
     }
 
     loginButton.addEventListener('click', loginAdmin);
@@ -57,14 +100,46 @@
 
     controls.querySelectorAll('[data-special]').forEach(button => {
       button.addEventListener('click', async () => {
-        const response = await fetch('/admin/action', {
+        try {
+          const data = await request('/admin/action', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ action: button.dataset.special })
+          });
+          message.textContent = data.ok ? '発動しました。' : (data.message || '発動できませんでした。');
+        } catch (error) {
+          message.textContent = error.message;
+        }
+      });
+    });
+
+    addCpu.addEventListener('click', async () => {
+      const count = Math.floor(Number(cpuCount.value));
+      if (!Number.isInteger(count) || count < 1) {
+        message.textContent = '1以上のCPU数を指定してください。';
+        return;
+      }
+      try {
+        const data = await request('/api/cpu', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ action: button.dataset.special })
+          body: JSON.stringify({ count })
         });
-        const data = await response.json();
-        message.textContent = data.ok ? '発動しました。' : (data.message || '発動できませんでした。');
-      });
+        message.textContent = `${data.added}体のCPUを追加しました。`;
+        await updateStatus();
+      } catch (error) {
+        message.textContent = error.message;
+      }
+    });
+
+    clearCpu.addEventListener('click', async () => {
+      try {
+        const data = await request('/api/cpu', { method: 'DELETE' });
+        message.textContent = 'CPUをすべて削除しました。';
+        await updateStatus();
+      } catch (error) {
+        message.textContent = error.message;
+      }
     });
   </script>
 </body>
