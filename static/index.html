@@ -13,9 +13,20 @@
     <button id="rain">🌧️ 雨</button>
     <button id="blackButton" title="全員の方向を0°にして、発動者のYへ集める">⬛ 全員強制整列</button>
   </div>
+  <div id="weaponbar">
+    <button data-weapon="potato">1 🥔</button>
+    <button data-weapon="chicken">2 🐔</button>
+    <button data-weapon="chair">3 🪑</button>
+    <button data-weapon="sock">4 🧦</button>
+    <button data-weapon="tinyBoom">5 🧨</button>
+    <button data-weapon="ducks">6 🦆</button>
+    <button data-weapon="mystery">7 ☢️</button>
+    <button id="fire">💥 発射</button>
+    <span id="weaponInfo">武器: 🥔 じゃがいも投げ　（1〜7で選択、Spaceで発射）</span>
+  </div>
   <div id="info"></div>
   <canvas id="game"></canvas>
-  <div id="help">常時前進　A / ← = 左　D / → = 右　（押している間0.01秒ごとに15°）　⬛：全員0°＋発動者のYへ、X±10に強制ワープ</div>
+  <div id="help">常時前進　A / ← = 左　D / → = 右　（押している間0.01秒ごとに15°）　武器: 1〜7 / Space　⬛：全員0°＋発動者のYへ、X±10に強制ワープ</div>
   <script src="/static/game.js"></script>
 </body>
 </html>
