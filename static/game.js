@@ -72,7 +72,7 @@ window.addEventListener("keyup", (event) => {
   keys.delete(event.key.toLowerCase());
 });
 
-// Rotation is intentionally much faster than rendering: 15° every 0.01s while held.
+// 15° every 0.01s while held.
 setInterval(() => {
   const left = keys.has("a") || keys.has("arrowleft");
   const right = keys.has("d") || keys.has("arrowright");
@@ -85,6 +85,36 @@ rainButton.addEventListener("click", () => {
     socket.send(JSON.stringify({ action: "rain" }));
   }
 });
+
+function drawSmoothTerritory(gw, gh, scale, ox, oy) {
+  // The server still uses a grid for authoritative territory counts.
+  // Rendering uses round caps + joins so diagonal movement looks like smooth ink.
+  const radius = Math.max(2, scale * 0.62);
+
+  for (let y = 0; y < gh; y++) {
+    for (let x = 0; x < gw; x++) {
+      const owner = state.territory[y * gw + x];
+      if (owner < 0) continue;
+
+      const color = playerColor(owner);
+      const px = ox + (x + 0.5) * scale;
+      const py = oy + (y + 0.5) * scale;
+
+      ctx.fillStyle = color;
+      ctx.beginPath();
+      ctx.arc(px, py, radius, 0, Math.PI * 2);
+      ctx.fill();
+
+      // Connect neighboring cells. This removes the staircase appearance.
+      if (x + 1 < gw && state.territory[y * gw + x + 1] === owner) {
+        ctx.fillRect(px, py - radius, scale, radius * 2);
+      }
+      if (y + 1 < gh && state.territory[(y + 1) * gw + x] === owner) {
+        ctx.fillRect(px - radius, py, radius * 2, scale);
+      }
+    }
+  }
+}
 
 function draw() {
   const w = canvas.clientWidth;
@@ -108,15 +138,7 @@ function draw() {
   const ox = (w - gw * scale) / 2;
   const oy = (h - gh * scale) / 2;
 
-  for (let y = 0; y < gh; y++) {
-    for (let x = 0; x < gw; x++) {
-      const owner = state.territory[y * gw + x];
-      if (owner >= 0) {
-        ctx.fillStyle = playerColor(owner);
-        ctx.fillRect(ox + x * scale, oy + y * scale, scale + 0.5, scale + 0.5);
-      }
-    }
-  }
+  drawSmoothTerritory(gw, gh, scale, ox, oy);
 
   for (const p of state.players) {
     if (!p.alive) continue;
