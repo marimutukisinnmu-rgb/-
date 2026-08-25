@@ -3,12 +3,14 @@ const ctx = canvas.getContext("2d");
 const statusEl = document.getElementById("status");
 const infoEl = document.getElementById("info");
 const rainButton = document.getElementById("rain");
+const blackButton = document.getElementById("blackButton");
 
 let state = null;
 let me = null;
 let socket = null;
 const keys = new Set();
 let rainFlash = 0;
+let blackFlash = 0;
 
 function resize() {
   const dpr = Math.max(1, Math.min(2, window.devicePixelRatio || 1));
@@ -50,6 +52,8 @@ function connect() {
       }
     } else if (data.type === "rain") {
       rainFlash = 1;
+    } else if (data.type === "blackButton") {
+      blackFlash = 1;
     } else if (data.type === "error") {
       statusEl.textContent = data.message;
     }
@@ -86,34 +90,43 @@ rainButton.addEventListener("click", () => {
   }
 });
 
+blackButton.addEventListener("click", () => {
+  if (socket?.readyState === WebSocket.OPEN) {
+    socket.send(JSON.stringify({ action: "blackButton" }));
+  }
+});
+
 function directionArrow(angle) {
-  // The game uses 15° steps, but the HUD arrow uses 8 readable directions.
   const normalized = ((angle % 360) + 360) % 360;
   const index = Math.round(normalized / 45) % 8;
   return ["→", "↘", "↓", "↙", "←", "↖", "↑", "↗"][index];
 }
 
-function drawPlayerDirection(p, scale) {
-  const px = p.x;
-  const py = p.y;
+function drawPlayerDirectionAt(p, px, py, scale) {
   const rad = p.angle * Math.PI / 180;
-  const length = Math.max(10, scale * 1.8);
+  const length = Math.max(12, scale * 1.8);
 
   ctx.save();
-  ctx.translate(px, py);
-  ctx.rotate(rad);
   ctx.strokeStyle = "white";
   ctx.lineWidth = Math.max(2, scale * 0.12);
   ctx.beginPath();
-  ctx.moveTo(0, 0);
-  ctx.lineTo(length, 0);
+  ctx.moveTo(px, py);
+  ctx.lineTo(px + Math.cos(rad) * length, py + Math.sin(rad) * length);
   ctx.stroke();
 
+  const endX = px + Math.cos(rad) * length;
+  const endY = py + Math.sin(rad) * length;
   ctx.fillStyle = "white";
   ctx.beginPath();
-  ctx.moveTo(length + scale * 0.25, 0);
-  ctx.lineTo(length - scale * 0.35, -scale * 0.28);
-  ctx.lineTo(length - scale * 0.35, scale * 0.28);
+  ctx.moveTo(endX, endY);
+  ctx.lineTo(
+    endX - Math.cos(rad - 0.55) * scale * 0.65,
+    endY - Math.sin(rad - 0.55) * scale * 0.65
+  );
+  ctx.lineTo(
+    endX - Math.cos(rad + 0.55) * scale * 0.65,
+    endY - Math.sin(rad + 0.55) * scale * 0.65
+  );
   ctx.closePath();
   ctx.fill();
   ctx.restore();
@@ -156,7 +169,6 @@ function draw() {
     const px = ox + p.x * scale;
     const py = oy + p.y * scale;
 
-    // Direction indicator: always points exactly along the player's movement direction.
     drawPlayerDirectionAt(p, px, py, scale);
 
     ctx.save();
@@ -192,37 +204,13 @@ function draw() {
     rainFlash = Math.max(0, rainFlash - 0.025);
   }
 
+  if (blackFlash > 0) {
+    ctx.fillStyle = `rgba(0,0,0,${0.45 * blackFlash})`;
+    ctx.fillRect(0, 0, w, h);
+    blackFlash = Math.max(0, blackFlash - 0.035);
+  }
+
   requestAnimationFrame(draw);
-}
-
-function drawPlayerDirectionAt(p, px, py, scale) {
-  const rad = p.angle * Math.PI / 180;
-  const length = Math.max(12, scale * 1.8);
-  const endX = px + Math.cos(rad) * length;
-  const endY = py + Math.sin(rad) * length;
-
-  ctx.save();
-  ctx.strokeStyle = "white";
-  ctx.lineWidth = Math.max(2, scale * 0.12);
-  ctx.beginPath();
-  ctx.moveTo(px, py);
-  ctx.lineTo(endX, endY);
-  ctx.stroke();
-
-  ctx.fillStyle = "white";
-  ctx.beginPath();
-  ctx.moveTo(endX, endY);
-  ctx.lineTo(
-    endX - Math.cos(rad - 0.55) * scale * 0.65,
-    endY - Math.sin(rad - 0.55) * scale * 0.65
-  );
-  ctx.lineTo(
-    endX - Math.cos(rad + 0.55) * scale * 0.65,
-    endY - Math.sin(rad + 0.55) * scale * 0.65
-  );
-  ctx.closePath();
-  ctx.fill();
-  ctx.restore();
 }
 
 function playerColor(id) {
