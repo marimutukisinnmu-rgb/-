@@ -2,37 +2,29 @@ const fs = require('fs');
 const Module = require('module');
 const path = require('path');
 
-const target = path.join(__dirname, 'server5.js');
+const target = path.join(__dirname, 'server4.js');
 let source = fs.readFileSync(target, 'utf8');
 
-const marker = 'const loaded = new Module(target, module);';
-const markerIndex = source.indexOf(marker);
-if (markerIndex < 0) throw new Error('server5 wrapper compile marker not found');
-
-const patchCode = `
-source = source.replace(/const adminSessions = new Set\\(\\);/, 'const adminSessions = new Set();\\nconst APTX_DEFAULT_SIZE = 2.0;\\nconst APTX_SMALL_SIZE = 0.2;');
-source = source.replace(/const WEAPONS = \\\\{/, "const WEAPONS = {\\n  aptx: { speed: 17, radius: 1.5, count: 1, spread: 0, aptx: true, emoji: '🧪' },");
-source = source.replace(/weapon: p\\.weapon,\\n\\s*weaponCooldown:/, 'weapon: p.weapon,\\n    size: p.size ?? APTX_DEFAULT_SIZE,\\n    singleShot: !!p.singleShot,\\n    weaponDisabled: !!p.weaponDisabled,\\n    weaponCooldown:');
-source = source.replace(/p\\.weapon = 'potato';\\n\\s*p\\.nextMysteryAt = 0;/, "p.weapon = 'potato';\\n    p.nextMysteryAt = 0;\\n    p.size = APTX_DEFAULT_SIZE;\\n    p.singleShot = false;\\n    p.weaponDisabled = false;\\n    p.fireReady = true;");
-source = source.replace(/weapon: 'potato', nextMysteryAt: 0, lastTurnAt: 0/, "weapon: 'potato', nextMysteryAt: 0, lastTurnAt: 0, size: APTX_DEFAULT_SIZE, singleShot: false, weaponDisabled: false, fireReady: true");
-source = source.replace(/weapon: WEAPON_KEYS\\[Math\\.floor\\(Math\\.random\\(\\) \\* \\(WEAPON_KEYS\\.length - 1\\)\\)\\], nextMysteryAt: 0, lastTurnAt: 0/, "weapon: WEAPON_KEYS[Math.floor(Math.random() * WEAPON_KEYS.length)], nextMysteryAt: 0, lastTurnAt: 0, size: APTX_DEFAULT_SIZE, singleShot: false, weaponDisabled: false, fireReady: true");
-source = source.replace(/function fireWeapon\\(p\\) \\{\\n\\s*if \\(!p\\.alive \\|\\| !gameStarted\\) return;/, "function fireWeapon(p) {\\n  if (!p.alive || !gameStarted) return;\\n  if (!p.cpu && p.weaponDisabled) return;\\n  if (!p.cpu && p.singleShot && !p.fireReady) return;");
-source = source.replace(/if \\(weapon\\.mystery\\) return mysteryWeapon\\(p\\);/, "if (weapon.mystery) return mysteryWeapon(p);\\n  if (!p.cpu && p.singleShot) p.fireReady = false;");
-source = source.replace(/explode: !!weapon\\.explode,\\n\\s*exploded: false,/, "explode: !!weapon.explode,\\n      aptx: !!weapon.aptx,\\n      hitAPTX: new Set(),\\n      exploded: false,");
-source = source.replace(/if \\(distanceWrapped\\(pr\\.x, pr\\.y, target\\.x, target\\.y\\) <= 1\\.4 \\+ pr\\.radius\\) \\{\\n\\s*applyWeaponArea\\(pr\\.owner, pr\\.x, pr\\.y, pr\\.radius\\);/, "if (distanceWrapped(pr.x, pr.y, target.x, target.y) <= 1.4 + pr.radius) {\\n      if (pr.aptx) {\\n        if (pr.hitAPTX.has(target.id)) continue;\\n        pr.hitAPTX.add(target.id);\\n        target.size = APTX_SMALL_SIZE;\\n        target.singleShot = true;\\n        target.fireReady = true;\\n        target.weaponDisabled = Math.random() < 0.25;\\n        broadcast({ type: 'apTX', playerId: target.id, size: target.size, singleShot: true, weaponDisabled: target.weaponDisabled });\\n        broadcastState();\\n        continue;\\n      }\\n      applyWeaponArea(pr.owner, pr.x, pr.y, pr.radius);");
-source = source.replace(/if \\(pr\\.radius > 0\\) paintCircle\\(pr\\.x, pr\\.y, pr\\.radius, pr\\.owner\\);/, "if (pr.radius > 0 && !pr.aptx) paintCircle(pr.x, pr.y, pr.radius, pr.owner);");
-source = source.replace(/else if \\(data\\.action === 'fire'\\) \\{\\n\\s*fireWeapon\\(p\\);\\n\\s*\\}/, "else if (data.action === 'fire') {\\n      fireWeapon(p);\\n    } else if (data.action === 'releaseFire') {\\n      p.fireReady = true;\\n    }");
-
-const requiredChecks = [
-  'APTX_DEFAULT_SIZE', 'aptx: true', 'p.singleShot && !p.fireReady',
-  'target.weaponDisabled = Math.random() < 0.25', 'releaseFire'
-];
-for (const check of requiredChecks) {
-  if (!source.includes(check)) throw new Error('APTX patch failed: ' + check);
+function replaceOnce(from, to) {
+  if (!source.includes(from)) throw new Error(`patch target not found: ${from.slice(0, 100)}`);
+  source = source.replace(from, to);
 }
-`;
 
-source = source.slice(0, markerIndex) + patchCode + '\n' + source.slice(markerIndex);
+replaceOnce("const adminSessions = new Set();", "const adminSessions = new Set();\nconst APTX_DEFAULT_SIZE = 2.0;\nconst APTX_SMALL_SIZE = 0.2;\nconst APTX_DURATION_MS = 30_000;");
+replaceOnce("const WEAPONS = {", "const WEAPONS = {\n  aptx: { speed: 17, radius: 1.5, count: 1, spread: 0, aptx: true },");
+replaceOnce("weaponCooldown: p.weapon === 'mystery' ? Math.max(0, p.nextMysteryAt - now) : 0", "size: p.size ?? APTX_DEFAULT_SIZE,\n    aptxUntil: p.aptxUntil ?? 0,\n    singleShot: !!p.singleShot,\n    weaponCooldown: p.weapon === 'mystery' ? Math.max(0, p.nextMysteryAt - now) : 0");
+replaceOnce("p.weapon = 'potato';\n    p.nextMysteryAt = 0;", "p.weapon = 'potato';\n    p.nextMysteryAt = 0;\n    p.size = APTX_DEFAULT_SIZE;\n    p.aptxUntil = 0;\n    p.singleShot = false;\n    p.fireReady = true;");
+replaceOnce("weapon: 'potato',\n    nextMysteryAt: 0,\n    lastTurnAt: 0", "weapon: 'potato',\n    nextMysteryAt: 0,\n    lastTurnAt: 0,\n    size: APTX_DEFAULT_SIZE,\n    aptxUntil: 0,\n    singleShot: false,\n    fireReady: true");
+replaceOnce("weapon: WEAPON_KEYS[Math.floor(Math.random() * (WEAPON_KEYS.length - 1))],\n    nextMysteryAt: 0,\n    lastTurnAt: 0", "weapon: WEAPON_KEYS[Math.floor(Math.random() * WEAPON_KEYS.length)],\n    nextMysteryAt: 0,\n    lastTurnAt: 0,\n    size: APTX_DEFAULT_SIZE,\n    aptxUntil: 0,\n    singleShot: false,\n    fireReady: true");
+replaceOnce("function fireWeapon(p) {\n  if (!p.alive || !gameStarted) return;", "function fireWeapon(p) {\n  if (!p.alive || !gameStarted) return;\n  const now = Date.now();\n  if (!p.cpu && p.aptxUntil > now) {\n    if (p.singleShot && !p.fireReady) return;\n    p.fireReady = false;\n  }\n  if (!p.cpu && p.aptxUntil > 0 && p.aptxUntil <= now) {\n    p.size = APTX_DEFAULT_SIZE;\n    p.aptxUntil = 0;\n    p.singleShot = false;\n    p.fireReady = true;\n  }");
+replaceOnce("exploded: false,\n      emoji:", "aptx: !!weapon.aptx,\n      hitAPTX: new Set(),\n      exploded: false,\n      emoji:");
+replaceOnce("if (distanceWrapped(pr.x, pr.y, target.x, target.y) <= 1.4 + pr.radius) {\n      applyWeaponArea(pr.owner, pr.x, pr.y, pr.radius);", "if (distanceWrapped(pr.x, pr.y, target.x, target.y) <= 1.4 + pr.radius) {\n      if (pr.aptx) {\n        if (pr.hitAPTX.has(target.id)) continue;\n        pr.hitAPTX.add(target.id);\n        if (Math.random() < 0.64) {\n          target.size = APTX_SMALL_SIZE;\n          target.aptxUntil = Date.now() + APTX_DURATION_MS;\n          target.singleShot = true;\n          target.fireReady = true;\n          broadcast({ type: 'apTX', playerId: target.id, outcome: 'survive', size: target.size, duration: APTX_DURATION_MS });\n        } else {\n          for (let i = 0; i < territory.length; i++) {\n            if (territory[i] === target.id) territory[i] = -1;\n          }\n          target.alive = false;\n          broadcast({ type: 'apTX', playerId: target.id, outcome: 'death' });\n          eliminateIfEmpty();\n        }\n        broadcastState();\n        continue;\n      }\n      applyWeaponArea(pr.owner, pr.x, pr.y, pr.radius);");
+replaceOnce("if (pr.radius > 0) paintCircle(pr.x, pr.y, pr.radius, pr.owner);", "if (pr.radius > 0 && !pr.aptx) paintCircle(pr.x, pr.y, pr.radius, pr.owner);");
+replaceOnce("} else if (data.action === 'fire') {\n      fireWeapon(p);\n    }", "} else if (data.action === 'fire') {\n      fireWeapon(p);\n    } else if (data.action === 'releaseFire') {\n      p.fireReady = true;\n    }");
+
+const observerSockets = new Set();
+replaceOnce("function broadcast(payload) {\n  const msg = typeof payload === 'string' ? payload : JSON.stringify(payload);\n  for (const p of players.values()) if (p.ws?.readyState === 1) p.ws.send(msg);\n}", "function broadcast(payload) {\n  const msg = typeof payload === 'string' ? payload : JSON.stringify(payload);\n  for (const p of players.values()) if (p.ws?.readyState === 1) p.ws.send(msg);\n  for (const ws of observerSockets) if (ws.readyState === 1) ws.send(msg);\n}");
+replaceOnce("wss.on('connection', ws => {\n  const p = createHuman(ws);", "wss.on('connection', (ws, req) => {\n  const requestUrl = new URL(req.url || '/', `http://${req.headers.host || 'localhost'}`);\n  if (requestUrl.searchParams.get('observer') === '1') {\n    if (!isAdmin(req)) { ws.close(); return; }\n    observerSockets.add(ws);\n    ws.send(stateMessage());\n    ws.on('close', () => observerSockets.delete(ws));\n    return;\n  }\n  const p = createHuman(ws);");
 
 const loaded = new Module(target, module);
 loaded.filename = target;
