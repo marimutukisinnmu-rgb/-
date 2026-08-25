@@ -72,7 +72,7 @@ window.addEventListener("keyup", (event) => {
   keys.delete(event.key.toLowerCase());
 });
 
-// 15° every 0.01s while held.
+// Rotation is intentionally much faster than rendering: 15° every 0.01s while held.
 setInterval(() => {
   const left = keys.has("a") || keys.has("arrowleft");
   const right = keys.has("d") || keys.has("arrowright");
@@ -86,34 +86,37 @@ rainButton.addEventListener("click", () => {
   }
 });
 
-function drawSmoothTerritory(gw, gh, scale, ox, oy) {
-  // The server still uses a grid for authoritative territory counts.
-  // Rendering uses round caps + joins so diagonal movement looks like smooth ink.
-  const radius = Math.max(2, scale * 0.62);
+function directionArrow(angle) {
+  // The game uses 15° steps, but the HUD arrow uses 8 readable directions.
+  const normalized = ((angle % 360) + 360) % 360;
+  const index = Math.round(normalized / 45) % 8;
+  return ["→", "↘", "↓", "↙", "←", "↖", "↑", "↗"][index];
+}
 
-  for (let y = 0; y < gh; y++) {
-    for (let x = 0; x < gw; x++) {
-      const owner = state.territory[y * gw + x];
-      if (owner < 0) continue;
+function drawPlayerDirection(p, scale) {
+  const px = p.x;
+  const py = p.y;
+  const rad = p.angle * Math.PI / 180;
+  const length = Math.max(10, scale * 1.8);
 
-      const color = playerColor(owner);
-      const px = ox + (x + 0.5) * scale;
-      const py = oy + (y + 0.5) * scale;
+  ctx.save();
+  ctx.translate(px, py);
+  ctx.rotate(rad);
+  ctx.strokeStyle = "white";
+  ctx.lineWidth = Math.max(2, scale * 0.12);
+  ctx.beginPath();
+  ctx.moveTo(0, 0);
+  ctx.lineTo(length, 0);
+  ctx.stroke();
 
-      ctx.fillStyle = color;
-      ctx.beginPath();
-      ctx.arc(px, py, radius, 0, Math.PI * 2);
-      ctx.fill();
-
-      // Connect neighboring cells. This removes the staircase appearance.
-      if (x + 1 < gw && state.territory[y * gw + x + 1] === owner) {
-        ctx.fillRect(px, py - radius, scale, radius * 2);
-      }
-      if (y + 1 < gh && state.territory[(y + 1) * gw + x] === owner) {
-        ctx.fillRect(px - radius, py, radius * 2, scale);
-      }
-    }
-  }
+  ctx.fillStyle = "white";
+  ctx.beginPath();
+  ctx.moveTo(length + scale * 0.25, 0);
+  ctx.lineTo(length - scale * 0.35, -scale * 0.28);
+  ctx.lineTo(length - scale * 0.35, scale * 0.28);
+  ctx.closePath();
+  ctx.fill();
+  ctx.restore();
 }
 
 function draw() {
@@ -138,12 +141,24 @@ function draw() {
   const ox = (w - gw * scale) / 2;
   const oy = (h - gh * scale) / 2;
 
-  drawSmoothTerritory(gw, gh, scale, ox, oy);
+  for (let y = 0; y < gh; y++) {
+    for (let x = 0; x < gw; x++) {
+      const owner = state.territory[y * gw + x];
+      if (owner >= 0) {
+        ctx.fillStyle = playerColor(owner);
+        ctx.fillRect(ox + x * scale, oy + y * scale, scale + 0.5, scale + 0.5);
+      }
+    }
+  }
 
   for (const p of state.players) {
     if (!p.alive) continue;
     const px = ox + p.x * scale;
     const py = oy + p.y * scale;
+
+    // Direction indicator: always points exactly along the player's movement direction.
+    drawPlayerDirectionAt(p, px, py, scale);
+
     ctx.save();
     ctx.translate(px, py);
     ctx.rotate(p.angle * Math.PI / 180);
@@ -159,7 +174,7 @@ function draw() {
 
   const alive = state.players.filter(p => p.alive);
   infoEl.textContent = alive
-    .map(p => `P${p.id + 1}: ${p.territory}`)
+    .map(p => `P${p.id + 1} ${directionArrow(p.angle)} ${Math.round(p.angle)}°: ${p.territory}`)
     .join("   ");
 
   if (state.winner !== null) {
@@ -178,6 +193,36 @@ function draw() {
   }
 
   requestAnimationFrame(draw);
+}
+
+function drawPlayerDirectionAt(p, px, py, scale) {
+  const rad = p.angle * Math.PI / 180;
+  const length = Math.max(12, scale * 1.8);
+  const endX = px + Math.cos(rad) * length;
+  const endY = py + Math.sin(rad) * length;
+
+  ctx.save();
+  ctx.strokeStyle = "white";
+  ctx.lineWidth = Math.max(2, scale * 0.12);
+  ctx.beginPath();
+  ctx.moveTo(px, py);
+  ctx.lineTo(endX, endY);
+  ctx.stroke();
+
+  ctx.fillStyle = "white";
+  ctx.beginPath();
+  ctx.moveTo(endX, endY);
+  ctx.lineTo(
+    endX - Math.cos(rad - 0.55) * scale * 0.65,
+    endY - Math.sin(rad - 0.55) * scale * 0.65
+  );
+  ctx.lineTo(
+    endX - Math.cos(rad + 0.55) * scale * 0.65,
+    endY - Math.sin(rad + 0.55) * scale * 0.65
+  );
+  ctx.closePath();
+  ctx.fill();
+  ctx.restore();
 }
 
 function playerColor(id) {
