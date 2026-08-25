@@ -1,0 +1,20 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>LAN Territory Battle</title>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+  <div id="topbar">
+    <div><strong>LAN Territory Battle</strong></div>
+    <div id="status">接続中...</div>
+    <button id="rain">🌧️ 雨</button>
+  </div>
+  <div id="info"></div>
+  <canvas id="game"></canvas>
+  <div id="help">常時前進　A / ← = 左　D / → = 右　（押している間0.01秒ごとに15°）</div>
+  <script src="/static/game.js"></script>
+</body>
+</html>
