@@ -1,11 +1,11 @@
 {
   "name": "territory-battle",
-  "version": "0.5.0",
+  "version": "0.6.0",
   "private": true,
   "description": "LAN multiplayer territory battle game",
-  "main": "server5.js",
+  "main": "server7.js",
   "scripts": {
-    "start": "node server5.js"
+    "start": "node server7.js"
   },
   "dependencies": {
     "ws": "^8.18.3"
